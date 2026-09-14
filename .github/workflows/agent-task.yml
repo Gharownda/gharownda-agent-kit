@@ -12,6 +12,10 @@ on:
         description: Local model key
         required: true
         default: qwen3-14b-q4
+      artifact_suffix:
+        description: Unique artifact namespace for this invocation
+        required: true
+        default: single
   workflow_call:
     inputs:
       task_file:
@@ -21,6 +25,11 @@ on:
       model_key:
         description: Local model key
         required: true
+        type: string
+      artifact_suffix:
+        description: Unique artifact namespace for this invocation
+        required: false
+        default: single
         type: string
 
 permissions:
@@ -56,7 +65,7 @@ jobs:
           python agent/runtime/worker.py --task "${{ inputs.task_file }}" --model-key "${{ inputs.model_key }}" --output /tmp/agent-worker/worker.json
       - uses: actions/upload-artifact@v7
         with:
-          name: agent-worker
+          name: agent-worker-${{ inputs.artifact_suffix }}
           path: /tmp/agent-worker/worker.json
           retention-days: 7
 
@@ -71,7 +80,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v8
         with:
-          name: agent-worker
+          name: agent-worker-${{ inputs.artifact_suffix }}
           path: /tmp/agent-worker
       - name: Verify proposal
         run: |
@@ -79,7 +88,7 @@ jobs:
           python agent/runtime/verify.py --task "${{ inputs.task_file }}" --worker-record /tmp/agent-worker/worker.json --report /tmp/agent-verification/verification.json --patch /tmp/agent-verification/candidate.patch
       - uses: actions/upload-artifact@v7
         with:
-          name: agent-verification
+          name: agent-verification-${{ inputs.artifact_suffix }}
           path: /tmp/agent-verification
           retention-days: 7
 
@@ -99,7 +108,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v8
         with:
-          name: agent-verification
+          name: agent-verification-${{ inputs.artifact_suffix }}
           path: /tmp/agent-verification
       - name: Install inference runtime
         run: |
@@ -112,7 +121,7 @@ jobs:
           python agent/runtime/reviewer.py --task "${{ inputs.task_file }}" --patch /tmp/agent-verification/candidate.patch --verification /tmp/agent-verification/verification.json --model-key "${{ inputs.model_key }}" --output /tmp/agent-review/review.json
       - uses: actions/upload-artifact@v7
         with:
-          name: agent-review
+          name: agent-review-${{ inputs.artifact_suffix }}
           path: /tmp/agent-review/review.json
           retention-days: 7
 
@@ -133,15 +142,15 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v8
         with:
-          name: agent-worker
+          name: agent-worker-${{ inputs.artifact_suffix }}
           path: /tmp/agent-worker
       - uses: actions/download-artifact@v8
         with:
-          name: agent-verification
+          name: agent-verification-${{ inputs.artifact_suffix }}
           path: /tmp/reviewed-verification
       - uses: actions/download-artifact@v8
         with:
-          name: agent-review
+          name: agent-review-${{ inputs.artifact_suffix }}
           path: /tmp/agent-review
       - name: Re-verify exact candidate
         run: |

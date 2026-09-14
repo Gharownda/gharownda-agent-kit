@@ -1,0 +1,90 @@
+name: Parallel bounded agent tasks
+run-name: parallel-agent-tasks
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_1:
+        description: First checked-in task manifest
+        required: true
+        default: agent/tasks/document-task-contract.json
+      task_2:
+        description: Optional second task manifest
+        required: false
+        default: ''
+      task_3:
+        description: Optional third task manifest
+        required: false
+        default: ''
+      task_4:
+        description: Optional fourth task manifest
+        required: false
+        default: ''
+      task_5:
+        description: Optional fifth task manifest
+        required: false
+        default: ''
+      model_key:
+        description: Local model key
+        required: true
+        default: qwen3-14b-q4
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: parallel-agent-tasks
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        name: Build bounded task matrix
+        env:
+          TASK_1: ${{ inputs.task_1 }}
+          TASK_2: ${{ inputs.task_2 }}
+          TASK_3: ${{ inputs.task_3 }}
+          TASK_4: ${{ inputs.task_4 }}
+          TASK_5: ${{ inputs.task_5 }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+
+          tasks = []
+          seen = set()
+          for slot in range(1, 6):
+              task_file = os.environ.get(f"TASK_{slot}", "").strip()
+              if not task_file:
+                  continue
+              if task_file in seen:
+                  raise SystemExit(f"duplicate task manifest: {task_file}")
+              if not task_file.startswith("agent/tasks/") or not task_file.endswith(".json"):
+                  raise SystemExit(f"invalid task manifest path: {task_file}")
+              seen.add(task_file)
+              tasks.append({"slot": slot, "task_file": task_file})
+
+          if not tasks:
+              raise SystemExit("at least one task manifest is required")
+
+          print("matrix=" + json.dumps({"include": tasks}, separators=(",", ":")))
+          PY
+
+  bounded-task:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    uses: ./.github/workflows/agent-task.yml
+    with:
+      task_file: ${{ matrix.task_file }}
+      model_key: ${{ inputs.model_key }}
+      artifact_suffix: slot-${{ matrix.slot }}
