@@ -5,7 +5,7 @@ This repository contains the framework that governs bounded coding agents. Autom
 ## Authority order
 
 1. Maintainer decisions recorded in the repository.
-2. Security and governance rules.
+2. Security and governance rules in `docs/GOVERNANCE.md`.
 3. Checked-in task manifests under `agent/tasks/`.
 4. Existing implementation details.
 
@@ -13,7 +13,7 @@ This repository contains the framework that governs bounded coding agents. Autom
 
 A worker may implement one trusted task manifest, edit only allow-listed files, make the smallest coherent change that satisfies the acceptance criteria, and report risks or blockers.
 
-A worker may not modify `.github/`, `AGENTS.md`, `docs/SECURITY.md`, `agent/runtime/`, `agent/companion/`, model qualification policy, or queue governance through the normal autonomous lane. It may not weaken tests or verification, expand task scope, change architectural policy, or merge its own work.
+A worker may not modify `.github/`, `AGENTS.md`, `docs/GOVERNANCE.md`, `agent/runtime/`, `agent/companion/`, model qualification policy, or queue governance through the normal autonomous lane. It may not weaken tests or verification, expand task scope, change architectural policy, or merge its own work.
 
 ## Reviewer role
 
