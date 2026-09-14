@@ -1,0 +1,67 @@
+name: Agent qualification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qualification.yml'
+      - 'agent/tasks/document-task-contract.json'
+      - 'agent/state/current.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: agent-qualification
+  cancel-in-progress: false
+
+jobs:
+  bounded-task:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      TASK_FILE: agent/tasks/document-task-contract.json
+      MODEL_KEY: qwen3-14b-q4
+      PIP_NO_CACHE_DIR: '1'
+      HF_HOME: /tmp/huggingface
+      HF_XET_CHUNK_CACHE_SIZE_BYTES: '0'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Run deterministic baseline tests
+        run: python -m unittest discover -s tests -v
+      - name: Install local inference runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'huggingface_hub>=0.34'
+          python -m pip install 'llama-cpp-python>=0.3.16' --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+      - name: Worker proposal
+        run: |
+          mkdir -p /tmp/worker
+          python agent/runtime/worker.py --task "$TASK_FILE" --model-key "$MODEL_KEY" --output /tmp/worker/worker.json
+      - name: Deterministic verification
+        run: |
+          mkdir -p /tmp/verification
+          python agent/runtime/verify.py --task "$TASK_FILE" --worker-record /tmp/worker/worker.json --report /tmp/verification/report.json --patch /tmp/verification/candidate.patch
+      - name: Independent model review
+        run: |
+          mkdir -p /tmp/review
+          python agent/runtime/reviewer.py --task "$TASK_FILE" --patch /tmp/verification/candidate.patch --verification /tmp/verification/report.json --model-key "$MODEL_KEY" --output /tmp/review/review.json
+      - name: Reapply exact reviewed proposal
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          python agent/runtime/verify.py --task "$TASK_FILE" --worker-record /tmp/worker/worker.json --report /tmp/publish-report.json --patch /tmp/publish.patch
+          cmp /tmp/publish.patch /tmp/verification/candidate.patch
+      - name: Publish reviewed work
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python agent/runtime/publish.py --task "$TASK_FILE" --verification /tmp/publish-report.json --review /tmp/review/review.json --base main
