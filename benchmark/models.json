@@ -1,0 +1,20 @@
+{
+  "active": [
+    {
+      "key": "qwen3-14b-q4",
+      "repo": "ggml-org/Qwen3-14B-GGUF",
+      "file": "Qwen3-14B-Q4_K_M.gguf",
+      "family": "qwen3",
+      "params": "14B",
+      "quant": "Q4_K_M"
+    },
+    {
+      "key": "qwen3-8b-q4",
+      "repo": "Qwen/Qwen3-8B-GGUF",
+      "file": "Qwen3-8B-Q4_K_M.gguf",
+      "family": "qwen3",
+      "params": "8B",
+      "quant": "Q4_K_M"
+    }
+  ]
+}
