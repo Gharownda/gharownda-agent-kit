@@ -37,7 +37,7 @@ Each task manifest must contain the following fields:
     "Document the required manifest fields.",
     "Explain the purpose of context_files and editable_files.",
     "Explain the worker, verification, review, and maintainer lifecycle.",
-    "Include a small JSON example consistent with the repository implementation.",
+    "Include a small JSON example consistent with the repository implementation."
   ],
   "context_files": [
     "README.md",
