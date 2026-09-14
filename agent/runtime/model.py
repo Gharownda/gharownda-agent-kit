@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+from llama_cpp import Llama
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_gguf(model_key: str, *, context: int = 4096) -> tuple[dict, Llama]:
+    manifest = json.loads((REPO_ROOT / "benchmark" / "models.json").read_text())
+    entry = next((item for item in manifest["active"] if item["key"] == model_key), None)
+    if not entry:
+        raise SystemExit(f"Unknown model key: {model_key}")
+    llm = Llama.from_pretrained(
+        repo_id=entry["repo"],
+        filename=entry["file"],
+        n_ctx=context,
+        n_threads=max(1, min(4, os.cpu_count() or 1)),
+        n_batch=128,
+        verbose=False,
+    )
+    return entry, llm
