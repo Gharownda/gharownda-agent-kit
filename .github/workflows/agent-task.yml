@@ -12,6 +12,16 @@ on:
         description: Local model key
         required: true
         default: qwen3-14b-q4
+  workflow_call:
+    inputs:
+      task_file:
+        description: Checked-in task manifest
+        required: true
+        type: string
+      model_key:
+        description: Local model key
+        required: true
+        type: string
 
 permissions:
   contents: read
