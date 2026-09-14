@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path, PurePosixPath
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(os.environ.get("AGENT_TARGET_ROOT", RUNTIME_ROOT)).resolve()
 TASK_ROOT = PurePosixPath("agent/tasks")
 PROTECTED_PREFIXES = (
     PurePosixPath(".git"),
