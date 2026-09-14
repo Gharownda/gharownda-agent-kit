@@ -6,11 +6,11 @@ from pathlib import Path
 
 from llama_cpp import Llama
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_gguf(model_key: str, *, context: int = 4096) -> tuple[dict, Llama]:
-    manifest = json.loads((REPO_ROOT / "benchmark" / "models.json").read_text())
+    manifest = json.loads((RUNTIME_ROOT / "benchmark" / "models.json").read_text())
     entry = next((item for item in manifest["active"] if item["key"] == model_key), None)
     if not entry:
         raise SystemExit(f"Unknown model key: {model_key}")
