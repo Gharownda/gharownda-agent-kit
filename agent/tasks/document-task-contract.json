@@ -1,0 +1,20 @@
+{
+  "id": "document-task-contract",
+  "title": "Document the task manifest format",
+  "objective": "Expand docs/TASKS.md into a concise contributor reference for the task manifest format used by this repository.",
+  "acceptance_criteria": [
+    "Document the required manifest fields.",
+    "Explain the purpose of context_files and editable_files.",
+    "Explain the worker, verification, review, and maintainer lifecycle.",
+    "Include a small JSON example consistent with the repository implementation."
+  ],
+  "context_files": [
+    "README.md",
+    "AGENTS.md",
+    "docs/GOVERNANCE.md",
+    "agent/runtime/contracts.py",
+    "docs/TASKS.md"
+  ],
+  "editable_files": ["docs/TASKS.md"],
+  "test_commands": [["python", "-m", "unittest", "discover", "-s", "tests", "-v"]]
+}
