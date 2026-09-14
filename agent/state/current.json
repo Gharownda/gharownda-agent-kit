@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "document-task-contract",
+      "title": "Document the task manifest format",
+      "task_manifest": "agent/tasks/document-task-contract.json",
+      "status": "ready",
+      "priority": 10,
+      "depends_on": [],
+      "attempts": 0,
+      "max_attempts": 2
+    }
+  ]
+}
