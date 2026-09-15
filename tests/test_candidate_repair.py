@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import sys
+import types
 import unittest
+from pathlib import Path
 
-from agent.runtime.repair_candidate import merge_proposals
+RUNTIME = Path(__file__).resolve().parents[1] / "agent" / "runtime"
+sys.path.insert(0, str(RUNTIME))
+model_stub = types.ModuleType("model")
+model_stub.load_gguf = lambda *_args, **_kwargs: None
+sys.modules.setdefault("model", model_stub)
+
+from repair_candidate import merge_proposals
 
 
 class CandidateRepairTest(unittest.TestCase):
     def task(self) -> dict:
-        return {
-            "editable_files": ["app/a.rb", "app/b.rb"],
-        }
+        return {"editable_files": ["app/a.rb", "app/b.rb"]}
 
     def test_repair_preserves_unmodified_previous_changes(self):
         previous = {
