@@ -223,7 +223,36 @@ jobs:
           python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-2.json --report /tmp/verification.json --patch /tmp/candidate.patch
 
       - name: Independently review candidate
+        id: reviewer_initial
+        continue-on-error: true
         if: steps.select.outputs.has_work == 'true' && (steps.verify_initial.outcome == 'success' || steps.verify_repair_1.outcome == 'success' || steps.verify_repair_2.outcome == 'success')
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/reviewer.py --task "$task" --patch /tmp/candidate.patch --verification /tmp/verification.json --model-key qwen3-14b-q4 --output /tmp/review.json
+
+      - name: Repair candidate after reviewer changes request
+        if: steps.select.outputs.has_work == 'true' && steps.reviewer_initial.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          worker=/tmp/worker.json
+          if [ "${{ steps.verify_initial.outcome }}" = "failure" ]; then worker=/tmp/worker-repair-1.json; fi
+          if [ "${{ steps.verify_initial.outcome }}" = "failure" ] && [ "${{ steps.verify_repair_1.outcome }}" = "failure" ]; then worker=/tmp/worker-repair-2.json; fi
+          python agent-kit/agent/runtime/repair_candidate.py --task "$task" --worker-record "$worker" --review /tmp/review.json --model-key qwen3-14b-q4 --output /tmp/worker-review-repair.json
+
+      - name: Verify reviewer-repaired candidate
+        if: steps.select.outputs.has_work == 'true' && steps.reviewer_initial.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-review-repair.json --report /tmp/verification.json --patch /tmp/candidate.patch
+
+      - name: Review repaired candidate
+        if: steps.select.outputs.has_work == 'true' && steps.reviewer_initial.outcome == 'failure'
         shell: bash
         run: |
           set -euo pipefail
