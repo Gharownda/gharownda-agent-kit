@@ -1,6 +1,6 @@
 # Gharownda Agent Kit
 
-Gharownda Agent Kit is a public, reusable GitHub Actions framework for bounded AI-assisted software development.
+Gharownda Agent Kit is a public, reusable framework for bounded AI-assisted software development.
 
 It is designed around a strict authority boundary:
 
@@ -12,6 +12,30 @@ It is designed around a strict authority boundary:
 - workers and reviewers may not rewrite the rules that govern their own work.
 
 The project deliberately contains no Gharownda private application source, credentials, production data, or private product requirements.
+
+## Local CLI
+
+The repository can be installed as a Python package and exposes `gak`, a small command-line interface for validating the same bounded task contracts used by the Actions runtime.
+
+```bash
+python -m pip install git+https://github.com/Gharownda/gharownda-agent-kit.git
+```
+
+Validate a task manifest in another repository:
+
+```bash
+gak --target-root /path/to/repository \
+  validate-task agent/tasks/example.json
+```
+
+Validate a candidate JSON proposal against that task's editable-file allow-list:
+
+```bash
+gak --target-root /path/to/repository \
+  validate-proposal agent/tasks/example.json /tmp/proposal.json
+```
+
+The CLI returns a small JSON summary on success and exits non-zero when the manifest, context, paths, or proposal violate the trusted contract. It does not run model inference or grant any extra authority.
 
 ## Pipeline
 
@@ -34,7 +58,7 @@ trusted task manifest
  queue selects next eligible task
 ```
 
-The initial runtime is derived from the bounded local-model harness previously proven in `faheemKamboh/multi-mail-mcp`, generalized here as an independent open-source project.
+The same contract runtime is usable locally through `gak` and by the public GitHub Actions coordinator.
 
 ## Model
 
