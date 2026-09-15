@@ -79,11 +79,15 @@ The coordinator runs every 30 minutes as a watchdog and may also be redispatched
 
 Each coordinator run exposes five generic slots. Every slot independently attempts to claim the highest-priority eligible private work using an atomic private lease. This allows slots to race without publishing task identifiers to the public Actions UI and prevents duplicate workers from owning the same task or repair.
 
+Private leases use opaque hashes rather than task identifiers and expire after six hours. Only leases carrying the Agent Kit lease commit marker are eligible for automatic stale cleanup; unknown refs are never deleted automatically.
+
 Priority order is:
 
 1. Existing bounded `agent/*` PR with trusted maintainer changes requested.
 2. Existing bounded `agent/*` PR with deterministic target CI failure.
 3. New enabled `worker-with-review` task from the private queue.
+
+Any open private PR carrying the same trusted task marker suppresses dispatch of a duplicate new worker, even when that PR was opened by a maintainer rather than an agent.
 
 Maintainer-only and maintainer-led architecture/security work is never promoted into this autonomous lane merely because a queue entry or comment exists.
 
@@ -93,7 +97,7 @@ Trusted repair feedback is collected in a privileged step and written to an ephe
 
 A repair worker checks out the existing private `agent/*` proposal, stays inside the original task's editable-file contract, reproduces targeted verification, proposes a bounded repair, runs the full deterministic task verification, receives an independent model review, and then updates the same private PR branch.
 
-Repeated failures must eventually be escalated to the maintainer rather than loop forever. Retry accounting and stale-lease recovery are coordinator responsibilities and must remain bounded.
+An agent PR receives at most **two automated repair commits** after its initial proposal. A third unresolved failure is left for maintainer intervention instead of consuming public runners indefinitely.
 
 ## Parallelism and quota isolation
 
