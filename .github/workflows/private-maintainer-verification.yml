@@ -1,0 +1,61 @@
+name: Private maintainer verification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/private-maintainer-verification.yml"
+      - "agent/private_target/verify_maintainer_prs.py"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TARGET_REPOSITORY: Gharownda/gharownda-app
+      MAX_PRIVATE_PRS: "5"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gharownda_test
+      RAILS_ENV: test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Verify private maintainer proposals
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::Private target token is unavailable"; exit 1; }
+          python agent/private_target/verify_maintainer_prs.py
