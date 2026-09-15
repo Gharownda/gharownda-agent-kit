@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -16,28 +15,6 @@ TEST_TIMEOUT_SECONDS = 180
 
 def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
-
-
-def trusted_feedback(pr_number: int) -> list[str]:
-    repo = os.environ["TARGET_REPOSITORY"]
-    trusted = {item.strip() for item in os.environ.get("TRUSTED_REVIEWERS", "").split(",") if item.strip()}
-    completed = run(["gh", "pr", "view", str(pr_number), "--repo", repo, "--json", "reviews,comments"])
-    if completed.returncode != 0:
-        raise RuntimeError("could not read trusted repair feedback")
-    value = json.loads(completed.stdout)
-    feedback: list[str] = []
-    for review in value.get("reviews") or []:
-        author = (review.get("author") or {}).get("login")
-        body = str(review.get("body") or "").strip()
-        state = str(review.get("state") or "").upper()
-        if author in trusted and body and state in {"CHANGES_REQUESTED", "COMMENTED"}:
-            feedback.append(body)
-    for comment in value.get("comments") or []:
-        author = (comment.get("author") or {}).get("login")
-        body = str(comment.get("body") or "").strip()
-        if author in trusted and body:
-            feedback.append(body)
-    return feedback[-8:]
 
 
 def verification_evidence(task: dict) -> list[dict]:
@@ -71,13 +48,15 @@ def verification_evidence(task: dict) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
-    parser.add_argument("--pr-number", required=True, type=int)
+    parser.add_argument("--feedback", required=True)
     parser.add_argument("--model-key", default="qwen3-14b-q4")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
     _, task = load_task(args.task)
-    feedback = trusted_feedback(args.pr_number)
+    feedback = json.loads(Path(args.feedback).read_text())
+    if not isinstance(feedback, list):
+        raise SystemExit("repair feedback must be a list")
     evidence = verification_evidence(task)
     diff = run(["git", "diff", "origin/main...HEAD", "--", *task["editable_files"]])
     if diff.returncode != 0:
