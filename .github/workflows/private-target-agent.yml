@@ -52,7 +52,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -147,6 +147,14 @@ jobs:
           set -euo pipefail
           bundle install --jobs 4 --retry 3 >/dev/null
           npm ci >/dev/null
+
+      - name: Prepare private test database
+        if: steps.select.outputs.has_work == 'true'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin/rails db:prepare >/dev/null
 
       - name: Install local inference runtime
         if: steps.select.outputs.has_work == 'true'
