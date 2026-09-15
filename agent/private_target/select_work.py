@@ -13,6 +13,7 @@ from urllib.parse import quote
 MAX_REPAIR_ATTEMPTS = 2
 LEASE_TTL = timedelta(hours=6)
 LEASE_MESSAGE_PREFIX = "bounded agent work lease:"
+FAILED_RUN_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
 
 
 def run(argv: list[str], *, cwd: Path, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -27,10 +28,10 @@ def run(argv: list[str], *, cwd: Path, input_text: str | None = None) -> subproc
     )
 
 
-def gh_json(args: list[str], *, cwd: Path) -> object:
-    completed = run(["gh", *args], cwd=cwd)
+def api_json(path: str, *, cwd: Path, failure_message: str) -> object:
+    completed = run(["gh", "api", "-H", "Accept: application/vnd.github+json", path], cwd=cwd)
     if completed.returncode != 0:
-        raise RuntimeError("private target API query failed")
+        raise RuntimeError(failure_message)
     return json.loads(completed.stdout or "null")
 
 
@@ -66,6 +67,76 @@ def has_failed_checks(pr: dict) -> bool:
     return False
 
 
+def list_open_prs(root: Path, repo: str) -> list[dict]:
+    value = api_json(
+        f"repos/{repo}/pulls?state=open&per_page=100",
+        cwd=root,
+        failure_message=(
+            "private pull-request read failed; configure the target token with "
+            "Pull requests: read/write"
+        ),
+    )
+    if not isinstance(value, list):
+        raise RuntimeError("unexpected private pull-request response")
+
+    result: list[dict] = []
+    for pr in value:
+        head = pr.get("head") or {}
+        result.append(
+            {
+                "number": int(pr["number"]),
+                "headRefName": str(head.get("ref") or ""),
+                "body": pr.get("body"),
+            }
+        )
+    return result
+
+
+def trusted_reviews(root: Path, repo: str, pr_number: int) -> list[dict]:
+    value = api_json(
+        f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100",
+        cwd=root,
+        failure_message=(
+            "private pull-request review read failed; configure the target token with "
+            "Pull requests: read/write"
+        ),
+    )
+    if not isinstance(value, list):
+        return []
+    return [
+        {
+            "author": {"login": (review.get("user") or {}).get("login")},
+            "state": review.get("state"),
+        }
+        for review in value
+    ]
+
+
+def has_failed_target_runs(root: Path, repo: str, head: str) -> bool:
+    completed = run(
+        [
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            repo,
+            "--branch",
+            head,
+            "--limit",
+            "20",
+            "--json",
+            "conclusion,status,event",
+        ],
+        cwd=root,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "private Actions read failed; configure the target token with Actions: read"
+        )
+    values = json.loads(completed.stdout or "[]")
+    return any(str(run_info.get("conclusion") or "").lower() in FAILED_RUN_CONCLUSIONS for run_info in values)
+
+
 def lease_hash(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
@@ -77,7 +148,9 @@ def delete_ref(root: Path, repo: str, ref: str) -> None:
 def active_leases(root: Path, repo: str) -> set[str]:
     completed = run(["gh", "api", f"repos/{repo}/git/matching-refs/heads/agent-lease/"], cwd=root)
     if completed.returncode != 0:
-        raise RuntimeError("could not inspect private work leases")
+        raise RuntimeError(
+            "could not inspect private work leases; configure the target token with Contents: read/write"
+        )
     values = json.loads(completed.stdout or "[]")
     now = datetime.now(timezone.utc)
     active: set[str] = set()
@@ -146,16 +219,24 @@ def claim(root: Path, repo: str, key: str) -> str | None:
         input_text=payload,
     )
     if lease_commit.returncode != 0:
-        raise RuntimeError("could not create private work lease commit")
+        raise RuntimeError(
+            "could not create private work lease commit; configure the target token with Contents: read/write"
+        )
     lease_sha = str(json.loads(lease_commit.stdout).get("sha") or "")
     if not lease_sha:
         raise RuntimeError("private work lease commit has no SHA")
 
     created = run(
         [
-            "gh", "api", "--method", "POST", f"repos/{repo}/git/refs",
-            "-f", f"ref=refs/heads/{ref}",
-            "-f", f"sha={lease_sha}",
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            f"repos/{repo}/git/refs",
+            "-f",
+            f"ref=refs/heads/{ref}",
+            "-f",
+            f"sha={lease_sha}",
         ],
         cwd=root,
     )
@@ -178,22 +259,17 @@ def main() -> None:
 
     root = Path(os.environ["AGENT_TARGET_ROOT"]).resolve()
     repo = os.environ["TARGET_REPOSITORY"]
-    trusted = {item.strip() for item in os.environ.get("TRUSTED_REVIEWERS", "").split(",") if item.strip()}
+    trusted = {
+        item.strip()
+        for item in os.environ.get("TRUSTED_REVIEWERS", "").split(",")
+        if item.strip()
+    }
     queue = json.loads((root / "agent" / "queue.json").read_text())
     if int(queue.get("max_parallel", 0)) > 5:
         raise RuntimeError("private queue exceeds public worker slot limit")
     catalog = task_catalog(root)
     leases = active_leases(root, repo)
-
-    prs = gh_json(
-        [
-            "pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
-            "--json", "number,headRefName,body,reviews,statusCheckRollup",
-        ],
-        cwd=root,
-    )
-    if not isinstance(prs, list):
-        raise RuntimeError("unexpected private PR response")
+    prs = list_open_prs(root, repo)
 
     open_task_ids: set[str] = set()
     candidates: list[dict] = []
@@ -205,8 +281,14 @@ def main() -> None:
         head = str(pr.get("headRefName") or "")
         if not task_id or task_id not in catalog or not head.startswith("agent/"):
             continue
-        if not (has_trusted_change_request(pr, trusted) or has_failed_checks(pr)):
+
+        review_payload = {"reviews": trusted_reviews(root, repo, int(pr["number"]))}
+        needs_repair = has_trusted_change_request(review_payload, trusted)
+        if not needs_repair:
+            needs_repair = has_failed_target_runs(root, repo, head)
+        if not needs_repair:
             continue
+
         task_file, task = catalog[task_id]
         if task.get("delegation") != "worker-with-review":
             continue
@@ -238,7 +320,9 @@ def main() -> None:
             continue
         if task.get("delegation") != "worker-with-review":
             continue
-        candidates.append({"kind": "new", "key": f"task:{task_id}", "task_id": task_id, "task_file": task_file})
+        candidates.append(
+            {"kind": "new", "key": f"task:{task_id}", "task_id": task_id, "task_file": task_file}
+        )
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
