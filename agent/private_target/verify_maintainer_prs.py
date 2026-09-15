@@ -51,6 +51,8 @@ def private_api(path: str, *, method: str = "GET", payload: dict | None = None) 
     if method != "GET":
         argv.extend(["--method", method])
     argv.append(path)
+    if payload is not None:
+        argv.extend(["--input", "-"])
     completed = subprocess.run(
         argv,
         input=json.dumps(payload) if payload is not None else None,
