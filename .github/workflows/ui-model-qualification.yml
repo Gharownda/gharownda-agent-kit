@@ -1,0 +1,62 @@
+name: UI model qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "benchmark/ui/**"
+      - ".github/workflows/ui-model-qualification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: qualify-${{ matrix.model }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          - qwen3-vl-4b-base
+          - frontend-design-lite-4b
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install llama.cpp application
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -LsSf https://llama.app/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify browser availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+
+      - name: Run synthetic UI qualification
+        shell: bash
+        env:
+          HF_HOME: /tmp/huggingface
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          set -euo pipefail
+          python benchmark/ui/run.py --model-key "${{ matrix.model }}" --output "benchmark-output/${{ matrix.model }}"
+
+      - name: Upload public benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-qualification-${{ matrix.model }}
+          path: benchmark-output/${{ matrix.model }}
+          if-no-files-found: warn
+          retention-days: 7
