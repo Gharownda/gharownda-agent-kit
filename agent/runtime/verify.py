@@ -17,6 +17,26 @@ def run(command: list[str]) -> dict:
     return {"argv": command, "returncode": completed.returncode, "elapsed_ms": round((time.perf_counter() - started) * 1000), "stdout": completed.stdout[-8000:], "stderr": completed.stderr[-8000:]}
 
 
+def restore_editable_files(task: dict) -> None:
+    paths = task["editable_files"]
+    subprocess.run(["git", "reset", "-q", "HEAD", "--", *paths], cwd=REPO_ROOT, check=False)
+    for rel in paths:
+        tracked = subprocess.run(
+            ["git", "cat-file", "-e", f"HEAD:{rel}"],
+            cwd=REPO_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+        target = REPO_ROOT / rel
+        if tracked:
+            subprocess.run(["git", "checkout", "HEAD", "--", rel], cwd=REPO_ROOT, check=True)
+        elif target.exists() or target.is_symlink():
+            if not target.is_file() and not target.is_symlink():
+                raise RuntimeError(f"editable path is not a file: {rel}")
+            target.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
@@ -29,6 +49,7 @@ def main() -> None:
     if worker.get("task_id") != task["id"] or not worker.get("valid"):
         raise SystemExit("worker record does not match trusted task")
     changes = validate_proposal(task, worker["proposal"])
+    restore_editable_files(task)
     for change in changes:
         target = REPO_ROOT / change["path"]
         target.parent.mkdir(parents=True, exist_ok=True)
