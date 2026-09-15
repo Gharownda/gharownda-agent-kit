@@ -17,6 +17,15 @@ def run(command: list[str]) -> dict:
     return {"argv": command, "returncode": completed.returncode, "elapsed_ms": round((time.perf_counter() - started) * 1000), "stdout": completed.stdout[-8000:], "stderr": completed.stderr[-8000:]}
 
 
+def ensure_safe_write_target(target: Path) -> None:
+    root = REPO_ROOT.resolve()
+    resolved = target.resolve(strict=False)
+    if not resolved.is_relative_to(root):
+        raise RuntimeError(f"editable path resolves outside repository: {target}")
+    if target.is_symlink():
+        raise RuntimeError(f"editable path must not be a symlink: {target}")
+
+
 def restore_editable_files(task: dict) -> None:
     paths = task["editable_files"]
     subprocess.run(["git", "reset", "-q", "HEAD", "--", *paths], cwd=REPO_ROOT, check=False)
@@ -53,6 +62,7 @@ def main() -> None:
     for change in changes:
         target = REPO_ROOT / change["path"]
         target.parent.mkdir(parents=True, exist_ok=True)
+        ensure_safe_write_target(target)
         target.write_text(change["content"])
     subprocess.run(["git", "add", "-N", "--", *[c["path"] for c in changes]], cwd=REPO_ROOT, check=False)
     diff = subprocess.run(["git", "diff", "--no-ext-diff", "--", *[c["path"] for c in changes]], cwd=REPO_ROOT, text=True, capture_output=True, check=True).stdout
