@@ -19,10 +19,11 @@ def main() -> None:
     lease = work.get("lease_ref")
     if not lease:
         return
-    root = Path(os.environ["AGENT_TARGET_ROOT"]).resolve()
+    repo = os.environ["TARGET_REPOSITORY"]
+    encoded = str(lease).replace("/", "%2F")
     subprocess.run(
-        ["git", "push", "origin", "--delete", str(lease)],
-        cwd=root,
+        ["gh", "api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{encoded}"],
+        env=os.environ.copy(),
         text=True,
         capture_output=True,
         check=False,
