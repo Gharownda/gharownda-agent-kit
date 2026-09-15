@@ -34,13 +34,13 @@ def run_model(model_ref: str, prompt: str) -> tuple[str, float]:
         "-p",
         "/no_think\n" + prompt,
         "-n",
-        "3000",
+        "1800",
         "--temp",
         "0",
         "--no-display-prompt",
     ]
     started = time.perf_counter()
-    completed = subprocess.run(command, text=True, capture_output=True, timeout=2400, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True, timeout=1500, check=False)
     elapsed = time.perf_counter() - started
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout)[-3000:])
@@ -64,6 +64,7 @@ def render(html_path: Path, output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-key", required=True)
+    parser.add_argument("--case", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -74,30 +75,30 @@ def main() -> None:
         raise SystemExit(f"unknown UI model: {args.model_key}")
 
     cases = json.loads((root / "cases.json").read_text())["cases"]
+    case = next((item for item in cases if item["id"] == args.case), None)
+    if not case:
+        raise SystemExit(f"unknown UI case: {args.case}")
+
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    results = []
+    record = {"case": case["id"], "model": args.model_key, "valid": False, "elapsed_seconds": None, "error": None}
+    try:
+        raw, elapsed = run_model(model["hf_ref"], case["prompt"])
+        (output / f"{case['id']}.raw.txt").write_text(raw)
+        html = extract_html(raw)
+        html_path = output / f"{case['id']}.html"
+        html_path.write_text(html)
+        missing = [text for text in case.get("required_text", []) if text.lower() not in html.lower()]
+        if missing:
+            raise ValueError(f"missing required text: {missing}")
+        render(html_path, output)
+        record.update(valid=True, elapsed_seconds=round(elapsed, 2))
+    except Exception as exc:
+        record["error"] = f"{type(exc).__name__}: {exc}"
 
-    for case in cases:
-        record = {"case": case["id"], "model": args.model_key, "valid": False, "elapsed_seconds": None, "error": None}
-        try:
-            raw, elapsed = run_model(model["hf_ref"], case["prompt"])
-            (output / f"{case['id']}.raw.txt").write_text(raw)
-            html = extract_html(raw)
-            html_path = output / f"{case['id']}.html"
-            html_path.write_text(html)
-            missing = [text for text in case.get("required_text", []) if text.lower() not in html.lower()]
-            if missing:
-                raise ValueError(f"missing required text: {missing}")
-            render(html_path, output)
-            record.update(valid=True, elapsed_seconds=round(elapsed, 2))
-        except Exception as exc:
-            record["error"] = f"{type(exc).__name__}: {exc}"
-        results.append(record)
-
-    (output / "results.json").write_text(json.dumps({"model": model, "results": results}, indent=2))
-    if not all(item["valid"] for item in results):
-        raise SystemExit("one or more UI benchmark cases failed")
+    (output / "results.json").write_text(json.dumps({"model": model, "results": [record]}, indent=2))
+    if not record["valid"]:
+        raise SystemExit("UI benchmark case failed")
 
 
 if __name__ == "__main__":

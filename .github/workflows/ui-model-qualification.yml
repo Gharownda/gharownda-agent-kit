@@ -13,15 +13,19 @@ permissions:
 
 jobs:
   qualify:
-    name: qualify-${{ matrix.model }}
+    name: qualify-${{ matrix.model }}-${{ matrix.case }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         model:
           - qwen3-vl-4b-base
           - frontend-design-lite-4b
+        case:
+          - mobile-task-list
+          - mobile-shopping-list
+          - responsive-dashboard
 
     steps:
       - uses: actions/checkout@v7
@@ -50,13 +54,16 @@ jobs:
           HF_HUB_DISABLE_TELEMETRY: "1"
         run: |
           set -euo pipefail
-          python benchmark/ui/run.py --model-key "${{ matrix.model }}" --output "benchmark-output/${{ matrix.model }}"
+          python benchmark/ui/run.py \
+            --model-key "${{ matrix.model }}" \
+            --case "${{ matrix.case }}" \
+            --output "benchmark-output/${{ matrix.model }}/${{ matrix.case }}"
 
       - name: Upload public benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-qualification-${{ matrix.model }}
-          path: benchmark-output/${{ matrix.model }}
+          name: ui-qualification-${{ matrix.model }}-${{ matrix.case }}
+          path: benchmark-output/${{ matrix.model }}/${{ matrix.case }}
           if-no-files-found: warn
           retention-days: 7
