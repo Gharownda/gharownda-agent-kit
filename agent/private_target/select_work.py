@@ -35,6 +35,27 @@ def api_json(path: str, *, cwd: Path, failure_message: str) -> object:
     return json.loads(completed.stdout or "null")
 
 
+def target_main_sha(root: Path, repo: str) -> str:
+    value = api_json(
+        f"repos/{repo}/git/ref/heads/main",
+        cwd=root,
+        failure_message="could not inspect private target main ref",
+    )
+    if not isinstance(value, dict):
+        raise RuntimeError("unexpected private target main-ref response")
+    sha = str((value.get("object") or {}).get("sha") or "")
+    if not sha:
+        raise RuntimeError("private target main ref has no SHA")
+    return sha
+
+
+def checkout_matches_target_main(root: Path, repo: str) -> bool:
+    local = run(["git", "rev-parse", "HEAD"], cwd=root)
+    if local.returncode != 0:
+        raise RuntimeError("could not resolve private target checkout")
+    return local.stdout.strip() == target_main_sha(root, repo)
+
+
 def task_catalog(root: Path) -> dict[str, tuple[str, dict]]:
     catalog: dict[str, tuple[str, dict]] = {}
     for path in sorted((root / "agent" / "tasks").glob("*.json")):
@@ -265,6 +286,13 @@ def main() -> None:
 
     root = Path(os.environ["AGENT_TARGET_ROOT"]).resolve()
     repo = os.environ["TARGET_REPOSITORY"]
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if not checkout_matches_target_main(root, repo):
+        output.write_text(json.dumps({"kind": "none", "reason": "stale_target_checkout"}))
+        return
+
     trusted = {
         item.strip()
         for item in os.environ.get("TRUSTED_REVIEWERS", "").split(",")
@@ -330,9 +358,10 @@ def main() -> None:
             {"kind": "new", "key": f"task:{task_id}", "task_id": task_id, "task_file": task_file}
         )
 
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
     for candidate in candidates:
+        if not checkout_matches_target_main(root, repo):
+            output.write_text(json.dumps({"kind": "none", "reason": "stale_target_checkout"}))
+            return
         digest = lease_hash(candidate["key"])
         if digest in leases:
             continue
