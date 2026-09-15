@@ -20,9 +20,8 @@ def main() -> None:
     if not lease:
         return
     repo = os.environ["TARGET_REPOSITORY"]
-    encoded = str(lease).replace("/", "%2F")
     subprocess.run(
-        ["gh", "api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{encoded}"],
+        ["gh", "api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{lease}"],
         env=os.environ.copy(),
         text=True,
         capture_output=True,
