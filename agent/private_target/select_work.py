@@ -9,12 +9,12 @@ import subprocess
 from pathlib import Path
 
 
-def run(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, cwd=cwd, env=env, text=True, capture_output=True, check=False)
+def run(argv: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, cwd=cwd, env=os.environ.copy(), text=True, capture_output=True, check=False)
 
 
 def gh_json(args: list[str], *, cwd: Path) -> object:
-    completed = run(["gh", *args], cwd=cwd, env=os.environ.copy())
+    completed = run(["gh", *args], cwd=cwd)
     if completed.returncode != 0:
         raise RuntimeError("private target API query failed")
     return json.loads(completed.stdout or "null")
@@ -56,45 +56,34 @@ def lease_hash(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
-def active_leases(root: Path) -> set[str]:
-    completed = run(["git", "ls-remote", "--heads", "origin", "refs/heads/agent-lease/*"], cwd=root)
+def active_leases(root: Path, repo: str) -> set[str]:
+    completed = run(["gh", "api", f"repos/{repo}/git/matching-refs/heads/agent-lease/"], cwd=root)
     if completed.returncode != 0:
         raise RuntimeError("could not inspect private work leases")
+    values = json.loads(completed.stdout or "[]")
     result = set()
-    for line in completed.stdout.splitlines():
-        ref = line.split()[-1] if line.split() else ""
+    for item in values:
+        ref = str(item.get("ref") or "")
         if ref.startswith("refs/heads/agent-lease/"):
             result.add(ref.rsplit("/", 1)[-1])
     return result
 
 
-def claim(root: Path, key: str) -> str | None:
+def claim(root: Path, repo: str, key: str) -> str | None:
     digest = lease_hash(key)
     ref = f"agent-lease/{digest}"
     base = run(["git", "rev-parse", "HEAD"], cwd=root)
-    tree = run(["git", "rev-parse", "HEAD^{tree}"], cwd=root)
-    if base.returncode != 0 or tree.returncode != 0:
+    if base.returncode != 0:
         raise RuntimeError("could not resolve private target base")
-    env = os.environ.copy()
-    env.update(
-        GIT_AUTHOR_NAME="gharownda-agent-kit",
-        GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com",
-        GIT_COMMITTER_NAME="gharownda-agent-kit",
-        GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com",
-    )
-    commit = subprocess.run(
-        ["git", "commit-tree", tree.stdout.strip(), "-p", base.stdout.strip()],
+    created = run(
+        [
+            "gh", "api", "--method", "POST", f"repos/{repo}/git/refs",
+            "-f", f"ref=refs/heads/{ref}",
+            "-f", f"sha={base.stdout.strip()}",
+        ],
         cwd=root,
-        env=env,
-        input="bounded agent work lease\n",
-        text=True,
-        capture_output=True,
-        check=False,
     )
-    if commit.returncode != 0:
-        raise RuntimeError("could not create private work lease")
-    pushed = run(["git", "push", "origin", f"{commit.stdout.strip()}:refs/heads/{ref}"], cwd=root)
-    return ref if pushed.returncode == 0 else None
+    return ref if created.returncode == 0 else None
 
 
 def main() -> None:
@@ -107,7 +96,7 @@ def main() -> None:
     trusted = {item.strip() for item in os.environ.get("TRUSTED_REVIEWERS", "").split(",") if item.strip()}
     queue = json.loads((root / "agent" / "queue.json").read_text())
     catalog = task_catalog(root)
-    leases = active_leases(root)
+    leases = active_leases(root, repo)
 
     prs = gh_json(
         [
@@ -164,7 +153,7 @@ def main() -> None:
         digest = lease_hash(candidate["key"])
         if digest in leases:
             continue
-        lease_ref = claim(root, candidate["key"])
+        lease_ref = claim(root, repo, candidate["key"])
         if lease_ref:
             candidate["lease_ref"] = lease_ref
             output.write_text(json.dumps(candidate))
