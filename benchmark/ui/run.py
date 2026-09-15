@@ -8,6 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
+MAX_OUTPUT_TOKENS = 800
+MODEL_TIMEOUT_SECONDS = 600
+
 
 def extract_html(raw: str) -> str:
     fenced = re.search(r"```(?:html)?\s*(.*?)```", raw, flags=re.IGNORECASE | re.DOTALL)
@@ -26,21 +29,32 @@ def extract_html(raw: str) -> str:
 
 
 def run_model(model_ref: str, prompt: str) -> tuple[str, float]:
+    bounded_prompt = (
+        prompt
+        + " Keep the document compact: use concise HTML/CSS, no comments, and stay well below "
+        + f"{MAX_OUTPUT_TOKENS} output tokens while preserving all requested visible elements."
+    )
     command = [
         "llama",
         "cli",
         "-hf",
         model_ref,
         "-p",
-        "/no_think\n" + prompt,
+        "/no_think\n" + bounded_prompt,
         "-n",
-        "1800",
+        str(MAX_OUTPUT_TOKENS),
         "--temp",
         "0",
         "--no-display-prompt",
     ]
     started = time.perf_counter()
-    completed = subprocess.run(command, text=True, capture_output=True, timeout=1500, check=False)
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        timeout=MODEL_TIMEOUT_SECONDS,
+        check=False,
+    )
     elapsed = time.perf_counter() - started
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout)[-3000:])
@@ -81,7 +95,14 @@ def main() -> None:
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    record = {"case": case["id"], "model": args.model_key, "valid": False, "elapsed_seconds": None, "error": None}
+    record = {
+        "case": case["id"],
+        "model": args.model_key,
+        "valid": False,
+        "elapsed_seconds": None,
+        "output_token_limit": MAX_OUTPUT_TOKENS,
+        "error": None,
+    }
     try:
         raw, elapsed = run_model(model["hf_ref"], case["prompt"])
         (output / f"{case['id']}.raw.txt").write_text(raw)
