@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -73,6 +75,42 @@ class PrivateTargetSelectorTest(unittest.TestCase):
         with patch.object(select_work, "run", return_value=self.completed(returncode=1)):
             with self.assertRaisesRegex(RuntimeError, "Pull requests: read/write"):
                 select_work.list_open_prs(Path("."), "owner/private")
+
+    def test_checkout_matches_current_target_main(self):
+        local = self.completed("abc123\n")
+        remote = self.completed(json.dumps({"object": {"sha": "abc123"}}))
+        with patch.object(select_work, "run", side_effect=[local, remote]):
+            self.assertTrue(select_work.checkout_matches_target_main(Path("."), "owner/private"))
+
+    def test_checkout_rejects_stale_target_main(self):
+        local = self.completed("old-sha\n")
+        remote = self.completed(json.dumps({"object": {"sha": "new-sha"}}))
+        with patch.object(select_work, "run", side_effect=[local, remote]):
+            self.assertFalse(select_work.checkout_matches_target_main(Path("."), "owner/private"))
+
+    def test_main_exits_without_leasing_when_target_checkout_is_stale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "work.json"
+            env = {
+                "AGENT_TARGET_ROOT": str(root),
+                "TARGET_REPOSITORY": "owner/private",
+            }
+            argv = ["select_work.py", "--output", str(output)]
+
+            with (
+                patch.dict(os.environ, env, clear=False),
+                patch("sys.argv", argv),
+                patch.object(select_work, "checkout_matches_target_main", return_value=False),
+                patch.object(select_work, "claim") as claim,
+            ):
+                select_work.main()
+
+            self.assertEqual(
+                json.loads(output.read_text()),
+                {"kind": "none", "reason": "stale_target_checkout"},
+            )
+            claim.assert_not_called()
 
     def test_failed_target_runs_consider_only_latest_run_per_workflow(self):
         payload = json.dumps(
