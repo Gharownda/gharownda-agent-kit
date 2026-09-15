@@ -178,6 +178,8 @@ jobs:
           fi
 
       - name: Deterministically verify candidate
+        id: verify_initial
+        continue-on-error: true
         if: steps.select.outputs.has_work == 'true'
         shell: bash
         run: |
@@ -185,8 +187,43 @@ jobs:
           task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
           python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker.json --report /tmp/verification.json --patch /tmp/candidate.patch
 
+      - name: Repair candidate after first verification failure
+        if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/repair_candidate.py --task "$task" --worker-record /tmp/worker.json --verification /tmp/verification.json --model-key qwen3-14b-q4 --output /tmp/worker-repair-1.json
+
+      - name: Reverify first repaired candidate
+        id: verify_repair_1
+        continue-on-error: true
+        if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-1.json --report /tmp/verification.json --patch /tmp/candidate.patch
+
+      - name: Repair candidate after second verification failure
+        if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure' && steps.verify_repair_1.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/repair_candidate.py --task "$task" --worker-record /tmp/worker-repair-1.json --verification /tmp/verification.json --model-key qwen3-14b-q4 --output /tmp/worker-repair-2.json
+
+      - name: Reverify second repaired candidate
+        id: verify_repair_2
+        if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure' && steps.verify_repair_1.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-2.json --report /tmp/verification.json --patch /tmp/candidate.patch
+
       - name: Independently review candidate
-        if: steps.select.outputs.has_work == 'true'
+        if: steps.select.outputs.has_work == 'true' && (steps.verify_initial.outcome == 'success' || steps.verify_repair_1.outcome == 'success' || steps.verify_repair_2.outcome == 'success')
         shell: bash
         run: |
           set -euo pipefail
@@ -194,7 +231,7 @@ jobs:
           python agent-kit/agent/runtime/reviewer.py --task "$task" --patch /tmp/candidate.patch --verification /tmp/verification.json --model-key qwen3-14b-q4 --output /tmp/review.json
 
       - name: Publish exact reviewed candidate to private repository
-        if: steps.select.outputs.has_work == 'true'
+        if: steps.select.outputs.has_work == 'true' && success()
         shell: bash
         env:
           TARGET_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
