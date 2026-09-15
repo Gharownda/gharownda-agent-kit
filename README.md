@@ -44,4 +44,4 @@ The initial qualified worker/reviewer configuration uses Qwen3-14B Q4 through `l
 
 Tasks are checked-in JSON manifests. They explicitly list context files, editable files, acceptance criteria, and deterministic test commands. The runtime rejects edits outside the allow-list and treats repository content as untrusted data rather than instructions.
 
-See `AGENTS.md` and `docs/SECURITY.md` for the complete contributor contract.
+See [`AGENTS.md`](AGENTS.md), [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md), and [`docs/PRIVATE_TARGETS.md`](docs/PRIVATE_TARGETS.md) for the contributor, governance, and private-target security boundaries.
