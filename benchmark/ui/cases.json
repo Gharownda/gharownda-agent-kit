@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "mobile-task-list",
+      "prompt": "Create a polished mobile-first task list screen for a generic household productivity app. Include a compact header, Today and Upcoming sections, checkbox controls, assignee initials, due-time labels, priority indication, and one obvious add-task action. The viewport is 390x844. Return one complete self-contained HTML document with inline CSS only, no JavaScript, no external assets, and no explanation.",
+      "required_text": ["Today", "Upcoming"]
+    },
+    {
+      "id": "mobile-shopping-list",
+      "prompt": "Create a polished mobile-first shared shopping checklist for a generic household app. Include a list title, progress summary, grouped grocery items, quantity text, purchased and unpurchased states, and a fast add-item control. The viewport is 390x844. Return one complete self-contained HTML document with inline CSS only, no JavaScript, no external assets, and no explanation.",
+      "required_text": []
+    },
+    {
+      "id": "responsive-dashboard",
+      "prompt": "Create a calm responsive household dashboard for a generic coordination app. Include navigation, a greeting, task summary, shopping summary, upcoming events, and recent activity. It must work at 390x844 and 1280x900 without horizontal scrolling. Return one complete self-contained HTML document with inline CSS only, no JavaScript, no external assets, and no explanation.",
+      "required_text": []
+    }
+  ]
+}

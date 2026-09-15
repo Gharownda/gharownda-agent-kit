@@ -1,0 +1,16 @@
+{
+  "candidates": [
+    {
+      "key": "qwen3-vl-4b-base",
+      "hf_ref": "Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M",
+      "kind": "baseline",
+      "notes": "Official Qwen3-VL 4B instruct GGUF baseline."
+    },
+    {
+      "key": "frontend-design-lite-4b",
+      "hf_ref": "stefans71/frontend-design-lite-4b:Q4_K_M",
+      "kind": "ui-specialist",
+      "notes": "Qwen3-VL 4B fine-tune specialized for frontend generation and visual critique."
+    }
+  ]
+}
