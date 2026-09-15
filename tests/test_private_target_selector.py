@@ -11,8 +11,13 @@ from agent.private_target import select_work
 
 
 class PrivateTargetSelectorTest(unittest.TestCase):
-    def completed(self, stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
+    def completed(
+        self,
+        stdout: str = "",
+        returncode: int = 0,
+        stderr: str = "",
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], returncode, stdout=stdout, stderr=stderr)
 
     def test_task_marker_is_parsed_only_from_explicit_private_pr_marker(self):
         self.assertEqual(
@@ -35,6 +40,46 @@ class PrivateTargetSelectorTest(unittest.TestCase):
     def test_failed_checks_detect_only_terminal_failure_states(self):
         self.assertFalse(select_work.has_failed_checks({"statusCheckRollup": [{"conclusion": "SUCCESS"}]}))
         self.assertTrue(select_work.has_failed_checks({"statusCheckRollup": [{"conclusion": "FAILURE"}]}))
+
+    def test_open_prs_use_rest_api_and_normalize_head(self):
+        payload = json.dumps(
+            [
+                {
+                    "number": 42,
+                    "body": "Task: `V1-06`",
+                    "head": {"ref": "agent/v1-06", "sha": "abc"},
+                }
+            ]
+        )
+        with patch.object(select_work, "run", return_value=self.completed(payload)) as mocked:
+            prs = select_work.list_open_prs(Path("."), "owner/private")
+
+        self.assertEqual(
+            prs,
+            [{"number": 42, "headRefName": "agent/v1-06", "body": "Task: `V1-06`"}],
+        )
+        command = mocked.call_args.args[0]
+        self.assertEqual(command[:3], ["gh", "api", "-H"])
+        self.assertIn("repos/owner/private/pulls?state=open&per_page=100", command)
+
+    def test_open_pr_permission_failure_is_actionable(self):
+        with patch.object(select_work, "run", return_value=self.completed(returncode=1)):
+            with self.assertRaisesRegex(RuntimeError, "Pull requests: read/write"):
+                select_work.list_open_prs(Path("."), "owner/private")
+
+    def test_failed_target_runs_use_actions_api_via_gh_run(self):
+        payload = json.dumps(
+            [
+                {"conclusion": "success", "status": "completed", "event": "pull_request"},
+                {"conclusion": "failure", "status": "completed", "event": "pull_request"},
+            ]
+        )
+        with patch.object(select_work, "run", return_value=self.completed(payload)) as mocked:
+            self.assertTrue(select_work.has_failed_target_runs(Path("."), "owner/private", "agent/v1-06"))
+
+        command = mocked.call_args.args[0]
+        self.assertEqual(command[:3], ["gh", "run", "list"])
+        self.assertIn("agent/v1-06", command)
 
     def test_repair_attempts_are_derived_from_private_branch_commits(self):
         response = self.completed(json.dumps({"total_commits": 3}))
