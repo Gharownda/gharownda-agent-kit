@@ -1,0 +1,82 @@
+name: Private target agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_file:
+        description: Task manifest path in the allow-listed private target
+        required: true
+        type: string
+      model_key:
+        description: Qualified model key
+        required: true
+        default: qwen3-14b-q4
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-target-${{ inputs.task_file }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      TARGET_REPOSITORY: Gharownda/gharownda-app
+      TASK_FILE: ${{ inputs.task_file }}
+      MODEL_KEY: ${{ inputs.model_key }}
+      GH_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+      PIP_NO_CACHE_DIR: '1'
+      HF_HOME: /tmp/huggingface
+      HF_XET_CHUNK_CACHE_SIZE_BYTES: '0'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: agent-kit
+
+      - name: Validate dispatch contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_FILE" in
+            agent/tasks/*.json) ;;
+            *) echo "Rejected task path"; exit 1 ;;
+          esac
+          test -n "$GH_TOKEN" || { echo "Private target credential is not configured"; exit 1; }
+          test "$TARGET_REPOSITORY" = "Gharownda/gharownda-app"
+
+      - name: Checkout allow-listed private target
+        uses: actions/checkout@v7
+        with:
+          repository: Gharownda/gharownda-app
+          token: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install inference runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install 'huggingface_hub>=0.34' >/dev/null
+          python -m pip install 'llama-cpp-python>=0.3.16' --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu >/dev/null
+
+      - name: Run bounded worker, verifier, reviewer, and private publisher
+        shell: bash
+        env:
+          AGENT_TARGET_ROOT: ${{ github.workspace }}/target
+          PYTHONPATH: ${{ github.workspace }}/agent-kit/agent/runtime
+        run: |
+          set -euo pipefail
+          echo "Private-target execution contract validated."
+          echo "Runtime migration is intentionally fail-closed until the private-target publisher is implemented and reviewed."
+          exit 1
