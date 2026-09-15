@@ -30,6 +30,7 @@ jobs:
           gh api repos/Gharownda/gharownda-app >/dev/null || { echo "::error::Private repository access is unavailable"; exit 1; }
           gh api "repos/Gharownda/gharownda-app/git/matching-refs/heads/agent-lease/" >/dev/null || { echo "::error::Target token needs Contents: read/write"; exit 1; }
           gh api "repos/Gharownda/gharownda-app/pulls?state=open&per_page=1" >/dev/null || { echo "::error::Target token needs Pull requests: read/write"; exit 1; }
+          gh api "repos/Gharownda/gharownda-app/issues?state=open&per_page=1" >/dev/null || { echo "::error::Target token needs Issues: read/write for private diagnostics"; exit 1; }
           gh api "repos/Gharownda/gharownda-app/actions/runs?per_page=1" >/dev/null || { echo "::error::Target token needs Actions: read"; exit 1; }
 
   worker:
@@ -185,7 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
-          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker.json --report /tmp/verification.json --patch /tmp/candidate.patch
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker.json --report /tmp/verification.json --patch /tmp/candidate.patch --attempt initial
 
       - name: Repair candidate after first verification failure
         if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure'
@@ -203,7 +204,7 @@ jobs:
         run: |
           set -euo pipefail
           task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
-          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-1.json --report /tmp/verification.json --patch /tmp/candidate.patch
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-1.json --report /tmp/verification.json --patch /tmp/candidate.patch --attempt repair-1
 
       - name: Repair candidate after second verification failure
         if: steps.select.outputs.has_work == 'true' && steps.verify_initial.outcome == 'failure' && steps.verify_repair_1.outcome == 'failure'
@@ -220,7 +221,7 @@ jobs:
         run: |
           set -euo pipefail
           task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
-          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-2.json --report /tmp/verification.json --patch /tmp/candidate.patch
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-repair-2.json --report /tmp/verification.json --patch /tmp/candidate.patch --attempt repair-2
 
       - name: Independently review candidate
         id: reviewer_initial
@@ -249,7 +250,7 @@ jobs:
         run: |
           set -euo pipefail
           task="$(python -c 'import json; print(json.load(open("/tmp/work.json"))["task_file"])')"
-          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-review-repair.json --report /tmp/verification.json --patch /tmp/candidate.patch
+          python agent-kit/agent/runtime/verify.py --task "$task" --worker-record /tmp/worker-review-repair.json --report /tmp/verification.json --patch /tmp/candidate.patch --attempt reviewer-repair
 
       - name: Review repaired candidate
         if: steps.select.outputs.has_work == 'true' && steps.reviewer_initial.outcome == 'failure'
@@ -260,6 +261,7 @@ jobs:
           python agent-kit/agent/runtime/reviewer.py --task "$task" --patch /tmp/candidate.patch --verification /tmp/verification.json --model-key qwen3-14b-q4 --output /tmp/review.json
 
       - name: Publish exact reviewed candidate to private repository
+        id: publish
         if: steps.select.outputs.has_work == 'true' && success()
         shell: bash
         env:
@@ -279,6 +281,15 @@ jobs:
           else
             python agent-kit/agent/runtime/publish.py --task "$task" --verification /tmp/verification.json --review /tmp/review.json --result /tmp/publish.json
           fi
+
+      - name: Post private failure diagnostics
+        if: always() && steps.select.outputs.has_work == 'true' && steps.publish.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+          python agent-kit/agent/private_target/report_failure.py --work /tmp/work.json
 
       - name: Release private work lease
         if: always() && steps.select.outputs.has_work == 'true'

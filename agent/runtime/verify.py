@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -14,7 +15,13 @@ TEST_TIMEOUT_SECONDS = 180
 def run(command: list[str]) -> dict:
     started = time.perf_counter()
     completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=TEST_TIMEOUT_SECONDS, check=False)
-    return {"argv": command, "returncode": completed.returncode, "elapsed_ms": round((time.perf_counter() - started) * 1000), "stdout": completed.stdout[-8000:], "stderr": completed.stderr[-8000:]}
+    return {
+        "argv": command,
+        "returncode": completed.returncode,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000),
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
 
 
 def ensure_safe_write_target(target: Path) -> None:
@@ -46,12 +53,23 @@ def restore_editable_files(task: dict) -> None:
             target.unlink()
 
 
+def preserve_attempt(report: dict, diff: str, attempt: str | None) -> None:
+    if not attempt:
+        return
+    safe_attempt = re.sub(r"[^A-Za-z0-9_.-]+", "-", attempt).strip("-") or "attempt"
+    directory = Path("/tmp/diagnostics")
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"verification-{safe_attempt}.json").write_text(json.dumps(report, indent=2))
+    (directory / f"candidate-{safe_attempt}.patch").write_text(diff)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
     parser.add_argument("--worker-record", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--patch", required=True)
+    parser.add_argument("--attempt")
     args = parser.parse_args()
     _, task = load_task(args.task)
     worker = json.loads(Path(args.worker_record).read_text())
@@ -75,8 +93,15 @@ def main() -> None:
     for index, command in enumerate(task["test_commands"]):
         try:
             result = run(command)
-        except subprocess.TimeoutExpired:
-            result = {"argv": command, "returncode": None, "elapsed_ms": TEST_TIMEOUT_SECONDS * 1000, "timeout": True, "stdout": "", "stderr": ""}
+        except subprocess.TimeoutExpired as exc:
+            result = {
+                "argv": command,
+                "returncode": None,
+                "elapsed_ms": TEST_TIMEOUT_SECONDS * 1000,
+                "timeout": True,
+                "stdout": exc.stdout or "",
+                "stderr": exc.stderr or "",
+            }
         results.append(result)
         if result.get("returncode") != 0:
             passed = False
@@ -96,6 +121,7 @@ def main() -> None:
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text(json.dumps(report, indent=2))
     Path(args.patch).write_text(diff)
+    preserve_attempt(report, diff, args.attempt)
     if not passed:
         print(f"verification stage {failed_test_index} failed with return code {failed_returncode}")
         raise SystemExit("proposal failed deterministic verification")
