@@ -16,7 +16,24 @@ permissions:
   actions: write
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate private target token permissions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::GHAROWNDA_APP_TOKEN is not configured"; exit 1; }
+          gh api repos/Gharownda/gharownda-app >/dev/null || { echo "::error::Private repository access is unavailable"; exit 1; }
+          gh api "repos/Gharownda/gharownda-app/git/matching-refs/heads/agent-lease/" >/dev/null || { echo "::error::Target token needs Contents: read/write"; exit 1; }
+          gh api "repos/Gharownda/gharownda-app/pulls?state=open&per_page=1" >/dev/null || { echo "::error::Target token needs Pull requests: read/write"; exit 1; }
+          gh api "repos/Gharownda/gharownda-app/actions/runs?per_page=1" >/dev/null || { echo "::error::Target token needs Actions: read"; exit 1; }
+
   worker:
+    needs: preflight
     name: worker-slot-${{ matrix.slot }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -55,14 +72,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: agent-kit
-
-      - name: Validate private credential configuration
-        shell: bash
-        env:
-          TARGET_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$TARGET_TOKEN" || { echo "Private target credential is not configured"; exit 1; }
 
       - name: Checkout private target without persisted credentials
         uses: actions/checkout@v7
