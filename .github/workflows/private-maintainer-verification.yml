@@ -3,7 +3,7 @@ name: Private maintainer verification
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/10 * * * *"
   push:
     branches: [main]
     paths:
@@ -12,6 +12,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: private-maintainer-verification
+  cancel-in-progress: false
 
 jobs:
   verify:
