@@ -51,20 +51,18 @@ def task_id_from_pr_body(body: str | None) -> str | None:
 
 
 def has_trusted_change_request(pr: dict, trusted: set[str]) -> bool:
-    for review in pr.get("reviews") or []:
+    latest_by_author: dict[str, tuple[int, str]] = {}
+    for position, review in enumerate(pr.get("reviews") or []):
         author = (review.get("author") or {}).get("login")
-        if author in trusted and str(review.get("state", "")).upper() == "CHANGES_REQUESTED":
-            return True
-    return False
-
-
-def has_failed_checks(pr: dict) -> bool:
-    failed = {"FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR"}
-    for check in pr.get("statusCheckRollup") or []:
-        conclusion = str(check.get("conclusion") or check.get("state") or "").upper()
-        if conclusion in failed:
-            return True
-    return False
+        if author not in trusted:
+            continue
+        review_id = review.get("id")
+        order = int(review_id) if isinstance(review_id, int) else position
+        state = str(review.get("state") or "").upper()
+        current = latest_by_author.get(author)
+        if current is None or order >= current[0]:
+            latest_by_author[author] = (order, state)
+    return any(state == "CHANGES_REQUESTED" for _, state in latest_by_author.values())
 
 
 def list_open_prs(root: Path, repo: str) -> list[dict]:
@@ -105,6 +103,7 @@ def trusted_reviews(root: Path, repo: str, pr_number: int) -> list[dict]:
         return []
     return [
         {
+            "id": review.get("id"),
             "author": {"login": (review.get("user") or {}).get("login")},
             "state": review.get("state"),
         }
@@ -113,28 +112,35 @@ def trusted_reviews(root: Path, repo: str, pr_number: int) -> list[dict]:
 
 
 def has_failed_target_runs(root: Path, repo: str, head: str) -> bool:
-    completed = run(
-        [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--branch",
-            head,
-            "--limit",
-            "20",
-            "--json",
-            "conclusion,status,event",
-        ],
+    encoded_head = quote(head, safe="")
+    value = api_json(
+        f"repos/{repo}/actions/runs?branch={encoded_head}&per_page=100",
         cwd=root,
+        failure_message="private Actions read failed; configure the target token with Actions: read",
     )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            "private Actions read failed; configure the target token with Actions: read"
-        )
-    values = json.loads(completed.stdout or "[]")
-    return any(str(run_info.get("conclusion") or "").lower() in FAILED_RUN_CONCLUSIONS for run_info in values)
+    if not isinstance(value, dict):
+        raise RuntimeError("unexpected private Actions response")
+    runs = value.get("workflow_runs") or []
+    if not isinstance(runs, list):
+        raise RuntimeError("unexpected private Actions run list")
+
+    latest_by_workflow: dict[str, dict] = {}
+    for run_info in runs:
+        workflow_id = str(run_info.get("workflow_id") or run_info.get("name") or "")
+        if not workflow_id:
+            continue
+        current = latest_by_workflow.get(workflow_id)
+        run_number = int(run_info.get("run_number") or 0)
+        current_number = int(current.get("run_number") or 0) if current else -1
+        if current is None or run_number > current_number:
+            latest_by_workflow[workflow_id] = run_info
+
+    for run_info in latest_by_workflow.values():
+        if str(run_info.get("status") or "").lower() != "completed":
+            continue
+        if str(run_info.get("conclusion") or "").lower() in FAILED_RUN_CONCLUSIONS:
+            return True
+    return False
 
 
 def lease_hash(key: str) -> str:
