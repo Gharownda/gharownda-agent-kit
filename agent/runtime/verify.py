@@ -39,7 +39,9 @@ def main() -> None:
         raise SystemExit("proposal produced no repository diff")
     results = []
     passed = True
-    for command in task["test_commands"]:
+    failed_test_index = None
+    failed_returncode = None
+    for index, command in enumerate(task["test_commands"]):
         try:
             result = run(command)
         except subprocess.TimeoutExpired:
@@ -47,12 +49,24 @@ def main() -> None:
         results.append(result)
         if result.get("returncode") != 0:
             passed = False
+            failed_test_index = index
+            failed_returncode = result.get("returncode")
             break
-    report = {"task_id": task["id"], "changed_files": [c["path"] for c in changes], "tests_passed": passed, "tests": results, "worker_summary": worker["proposal"].get("summary"), "worker_risks": worker["proposal"].get("risks", [])}
+    report = {
+        "task_id": task["id"],
+        "changed_files": [c["path"] for c in changes],
+        "tests_passed": passed,
+        "tests": results,
+        "failed_test_index": failed_test_index,
+        "failed_returncode": failed_returncode,
+        "worker_summary": worker["proposal"].get("summary"),
+        "worker_risks": worker["proposal"].get("risks", []),
+    }
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text(json.dumps(report, indent=2))
     Path(args.patch).write_text(diff)
     if not passed:
+        print(f"verification stage {failed_test_index} failed with return code {failed_returncode}")
         raise SystemExit("proposal failed deterministic verification")
 
 
