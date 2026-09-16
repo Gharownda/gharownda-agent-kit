@@ -1,0 +1,44 @@
+name: Private target watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Avoid the busiest top/half-hour schedule windows.
+    - cron: "7,22,37,52 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/private-target-watchdog.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: private-target-watchdog
+  cancel-in-progress: true
+
+jobs:
+  dispatch-if-needed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check for eligible private work and dispatch coordinator
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.GHAROWNDA_APP_TOKEN }}
+          PUBLIC_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_TOKEN" || { echo "::error::Private target token is unavailable"; exit 1; }
+
+          queue_json="$(GH_TOKEN="$PRIVATE_TOKEN" gh api repos/Gharownda/gharownda-app/contents/agent/queue.json --jq .content | base64 -d)"
+          enabled="$(printf '%s' "$queue_json" | jq '[.tasks[] | select(.enabled == true)] | length')"
+          proposals="$(GH_TOKEN="$PRIVATE_TOKEN" gh api 'repos/Gharownda/gharownda-app/pulls?state=open&per_page=100' --jq '[.[] | select(.head.ref | startswith("agent/"))] | length')"
+
+          if [ "$enabled" -gt 0 ] || [ "$proposals" -gt 0 ]; then
+            echo "Eligible private worker activity is present; dispatching coordinator."
+            GH_TOKEN="$PUBLIC_TOKEN" gh workflow run private-target-agent.yml --repo Gharownda/gharownda-agent-kit >/dev/null
+          else
+            echo "No eligible private worker activity; watchdog remains idle."
+          fi
