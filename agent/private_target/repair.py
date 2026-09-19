@@ -58,7 +58,11 @@ def main() -> None:
     if not isinstance(feedback, list):
         raise SystemExit("repair feedback must be a list")
     evidence = verification_evidence(task)
-    diff = run(["git", "diff", "origin/main...HEAD", "--", *task["editable_files"]])
+    # Private proposal branches are intentionally fetched with shallow history. A
+    # three-dot diff requires a locally available merge base and therefore fails
+    # for otherwise valid shallow proposal checkouts. Comparing the two trees
+    # directly gives the exact base-to-proposal patch without requiring ancestry.
+    diff = run(["git", "diff", "origin/main", "HEAD", "--", *task["editable_files"]])
     if diff.returncode != 0:
         raise SystemExit("could not inspect current private proposal")
 
@@ -81,7 +85,7 @@ def main() -> None:
     ]
     for rel in task["context_files"]:
         sections.extend([f"--- FILE: {rel} ---", (REPO_ROOT / rel).read_text(), f"--- END FILE: {rel} ---"])
-    sections.append('Output schema: {"summary":"...","changes":[{"path":"...","content":"..."}],"tests_expected":["..."],"risks":["..."]}')
+    sections.append('{"summary":"...","changes":[{"path":"...","content":"..."}],"tests_expected":["..."],"risks":["..."]}')
 
     model_entry, llm = load_gguf(args.model_key)
     started = time.perf_counter()
