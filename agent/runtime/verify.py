@@ -63,6 +63,13 @@ def preserve_attempt(report: dict, diff: str, attempt: str | None) -> None:
     (directory / f"candidate-{safe_attempt}.patch").write_text(diff)
 
 
+def write_report(report_path: str, patch_path: str, report: dict, diff: str, attempt: str | None) -> None:
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(report_path).write_text(json.dumps(report, indent=2))
+    Path(patch_path).write_text(diff)
+    preserve_attempt(report, diff, attempt)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
@@ -85,6 +92,19 @@ def main() -> None:
     subprocess.run(["git", "add", "-N", "--", *[c["path"] for c in changes]], cwd=REPO_ROOT, check=False)
     diff = subprocess.run(["git", "diff", "--no-ext-diff", "--", *[c["path"] for c in changes]], cwd=REPO_ROOT, text=True, capture_output=True, check=True).stdout
     if not diff.strip():
+        report = {
+            "task_id": task["id"],
+            "changed_files": [c["path"] for c in changes],
+            "tests_passed": False,
+            "tests": [],
+            "failed_test_index": None,
+            "failed_returncode": None,
+            "failure_kind": "empty_diff",
+            "failure_message": "proposal produced no repository diff",
+            "worker_summary": worker["proposal"].get("summary"),
+            "worker_risks": worker["proposal"].get("risks", []),
+        }
+        write_report(args.report, args.patch, report, diff, args.attempt)
         raise SystemExit("proposal produced no repository diff")
     results = []
     passed = True
@@ -118,10 +138,7 @@ def main() -> None:
         "worker_summary": worker["proposal"].get("summary"),
         "worker_risks": worker["proposal"].get("risks", []),
     }
-    Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.report).write_text(json.dumps(report, indent=2))
-    Path(args.patch).write_text(diff)
-    preserve_attempt(report, diff, args.attempt)
+    write_report(args.report, args.patch, report, diff, args.attempt)
     if not passed:
         print(f"verification stage {failed_test_index} failed with return code {failed_returncode}")
         raise SystemExit("proposal failed deterministic verification")
